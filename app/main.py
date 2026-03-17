@@ -25,6 +25,27 @@ TOOLS = [
                 "required": ["file_path"],
             },
         },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Write",
+            "description": "Write content to a file",
+            "parameters": {
+                "type": "object",
+                "required": ["file_path", "content"],
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path of the file to write to",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content to write to the file",
+                    },
+                },
+            },
+        },
     }
 ]
 
@@ -88,20 +109,34 @@ def main():
             function_name = getattr(function, "name", None)
             function_args = getattr(function, "arguments", "{}")
 
-            if function_name != "Read":
-                raise RuntimeError(f"unsupported tool: {function_name}")
-
             try:
                 parsed_args = json.loads(function_args)
             except json.JSONDecodeError as e:
                 raise RuntimeError("tool call arguments are not valid JSON") from e
 
-            file_path = parsed_args.get("file_path")
-            if not file_path or not isinstance(file_path, str):
-                raise RuntimeError("Read requires a string file_path")
+            if function_name == "Read":
+                file_path = parsed_args.get("file_path")
+                if not file_path or not isinstance(file_path, str):
+                    raise RuntimeError("Read requires a string file_path")
 
-            with open(file_path, "r", encoding="utf-8") as f:
-                file_contents = f.read()
+                with open(file_path, "r", encoding="utf-8") as f:
+                    tool_result = f.read()
+            elif function_name == "Write":
+                file_path = parsed_args.get("file_path")
+                content = parsed_args.get("content")
+                if not file_path or not isinstance(file_path, str):
+                    raise RuntimeError("Write requires a string file_path")
+                if content is None or not isinstance(content, str):
+                    raise RuntimeError("Write requires a string content")
+
+                file_dir = os.path.dirname(file_path)
+                if file_dir:
+                    os.makedirs(file_dir, exist_ok=True)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                tool_result = f"Wrote file: {file_path}"
+            else:
+                raise RuntimeError(f"unsupported tool: {function_name}")
 
             tool_call_id = getattr(tool_call, "id", None)
             if not tool_call_id:
@@ -110,7 +145,7 @@ def main():
                 {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
-                    "content": file_contents,
+                    "content": tool_result,
                 }
             )
 
