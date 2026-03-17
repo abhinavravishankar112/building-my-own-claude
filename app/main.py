@@ -38,51 +38,81 @@ def main():
         raise RuntimeError("OPENROUTER_API_KEY is not set")
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    messages = [{"role": "user", "content": args.p}]
 
-    chat = client.chat.completions.create(
-        model="anthropic/claude-haiku-4.5",
-        messages=[{"role": "user", "content": args.p}],
-        tools=TOOLS,
-    )
+    while True:
+        chat = client.chat.completions.create(
+            model="anthropic/claude-haiku-4.5",
+            messages=messages,
+            tools=TOOLS,
+        )
 
-    if not chat.choices or len(chat.choices) == 0:
-        raise RuntimeError("no choices in response")
+        if not chat.choices or len(chat.choices) == 0:
+            raise RuntimeError("no choices in response")
 
-    message = chat.choices[0].message
-    tool_calls = getattr(message, "tool_calls", None)
+        choice = chat.choices[0]
+        message = choice.message
+        tool_calls = getattr(message, "tool_calls", None) or []
 
-    if tool_calls and len(tool_calls) > 0:
-        tool_call = tool_calls[0]
-        function = getattr(tool_call, "function", None)
+        assistant_message = {
+            "role": "assistant",
+            "content": getattr(message, "content", None),
+        }
+        if len(tool_calls) > 0:
+            assistant_message["tool_calls"] = []
+            for tool_call in tool_calls:
+                function = getattr(tool_call, "function", None)
+                if not function:
+                    raise RuntimeError("tool call missing function")
+                assistant_message["tool_calls"].append(
+                    {
+                        "id": getattr(tool_call, "id", None),
+                        "type": getattr(tool_call, "type", "function"),
+                        "function": {
+                            "name": getattr(function, "name", None),
+                            "arguments": getattr(function, "arguments", "{}"),
+                        },
+                    }
+                )
+        messages.append(assistant_message)
 
-        if not function:
-            raise RuntimeError("tool call missing function")
+        if len(tool_calls) == 0:
+            print(message.content)
+            return
 
-        function_name = getattr(function, "name", None)
-        function_args = getattr(function, "arguments", "{}")
+        for tool_call in tool_calls:
+            function = getattr(tool_call, "function", None)
+            if not function:
+                raise RuntimeError("tool call missing function")
 
-        if function_name != "Read":
-            raise RuntimeError(f"unsupported tool: {function_name}")
+            function_name = getattr(function, "name", None)
+            function_args = getattr(function, "arguments", "{}")
 
-        try:
-            parsed_args = json.loads(function_args)
-        except json.JSONDecodeError as e:
-            raise RuntimeError("tool call arguments are not valid JSON") from e
+            if function_name != "Read":
+                raise RuntimeError(f"unsupported tool: {function_name}")
 
-        file_path = parsed_args.get("file_path")
-        if not file_path or not isinstance(file_path, str):
-            raise RuntimeError("Read requires a string file_path")
+            try:
+                parsed_args = json.loads(function_args)
+            except json.JSONDecodeError as e:
+                raise RuntimeError("tool call arguments are not valid JSON") from e
 
-        with open(file_path, "r", encoding="utf-8") as f:
-            file_contents = f.read()
+            file_path = parsed_args.get("file_path")
+            if not file_path or not isinstance(file_path, str):
+                raise RuntimeError("Read requires a string file_path")
 
-        print(file_contents)
-        return
+            with open(file_path, "r", encoding="utf-8") as f:
+                file_contents = f.read()
 
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!", file=sys.stderr)
-
-    print(message.content)
+            tool_call_id = getattr(tool_call, "id", None)
+            if not tool_call_id:
+                raise RuntimeError("tool call missing id")
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": file_contents,
+                }
+            )
 
 
 if __name__ == "__main__":
