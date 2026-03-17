@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 
@@ -47,10 +48,41 @@ def main():
     if not chat.choices or len(chat.choices) == 0:
         raise RuntimeError("no choices in response")
 
+    message = chat.choices[0].message
+    tool_calls = getattr(message, "tool_calls", None)
+
+    if tool_calls and len(tool_calls) > 0:
+        tool_call = tool_calls[0]
+        function = getattr(tool_call, "function", None)
+
+        if not function:
+            raise RuntimeError("tool call missing function")
+
+        function_name = getattr(function, "name", None)
+        function_args = getattr(function, "arguments", "{}")
+
+        if function_name != "Read":
+            raise RuntimeError(f"unsupported tool: {function_name}")
+
+        try:
+            parsed_args = json.loads(function_args)
+        except json.JSONDecodeError as e:
+            raise RuntimeError("tool call arguments are not valid JSON") from e
+
+        file_path = parsed_args.get("file_path")
+        if not file_path or not isinstance(file_path, str):
+            raise RuntimeError("Read requires a string file_path")
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            file_contents = f.read()
+
+        print(file_contents)
+        return
+
     # You can use print statements as follows for debugging, they'll be visible when running tests.
     print("Logs from your program will appear here!", file=sys.stderr)
 
-    print(chat.choices[0].message.content)
+    print(message.content)
 
 
 if __name__ == "__main__":
