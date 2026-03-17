@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 from openai import OpenAI
@@ -43,6 +44,23 @@ TOOLS = [
                         "type": "string",
                         "description": "The content to write to the file",
                     },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Bash",
+            "description": "Execute a shell command",
+            "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The command to execute",
+                    }
                 },
             },
         },
@@ -135,6 +153,31 @@ def main():
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(content)
                 tool_result = f"Wrote file: {file_path}"
+            elif function_name == "Bash":
+                command = parsed_args.get("command")
+                if not command or not isinstance(command, str):
+                    raise RuntimeError("Bash requires a string command")
+
+                completed = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                stdout_text = completed.stdout or ""
+                stderr_text = completed.stderr or ""
+                output = f"{stdout_text}{stderr_text}".strip()
+
+                if completed.returncode != 0:
+                    if output:
+                        tool_result = (
+                            f"Command failed with exit code {completed.returncode}:\n{output}"
+                        )
+                    else:
+                        tool_result = f"Command failed with exit code {completed.returncode}"
+                else:
+                    tool_result = output
             else:
                 raise RuntimeError(f"unsupported tool: {function_name}")
 
